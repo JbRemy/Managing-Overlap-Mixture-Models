@@ -19,6 +19,8 @@ for i in range(d):
 
 ioom_classifier = IOOM()
 
-ioom_classifier.fit(X, 1, 100, alpha=1, omega=0.1, prop_new_clusts=True)
+Z_true = np.transpose(np.array([[1]*50+[0]*50,[0]*50+[1]*50]))
 
+Z, Theta = ioom_classifier.fit(X, 2, 100, alpha=1, omega=0.1, prop_new_clusts=False)
 
+((np.dot(Z,np.transpose(Z))-np.dot(Z_true,np.transpose(Z_true)))<0).sum()/(100**2)
