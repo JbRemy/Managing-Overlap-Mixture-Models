@@ -1,38 +1,41 @@
 import numpy as np
-from scipy.stats import beta
+import time as time
 
 class IOOM:
     def __init__(self, Type = 'Binaries'):
 
         self.Type = Type
 
-    def rate(self, x, z, Theta):
+    def P_x_i(self, x, z, Theta):
 
         if self.Type == 'Binaries':
-            rate = 1
-            for d in range(np.shape(Theta)[1]):
-                theta_temp = np.prod(np.power(Theta[:,d], z))/(np.prod(np.power(1-Theta[:,d], z))+ np.prod(np.power(Theta[:,d], z)))
-                rate = rate*(theta_temp**x[d])*((1-theta_temp)**(1-x[d]))
 
-        return rate
+            return np.prod([self.P_x_id(x[d], z, Theta[:,d]) for d in range(np.shape(Theta)[1])])
 
-    def rate_ratio(self, x, i, k, z_1, z_2, Theta):
+
+    def P_x_d(self, x, z, Theta):
 
         if self.Type == 'Binaries':
-            rate = 1
+
+            return np.prod([self.P_x_id(x[i], z[i, :], Theta) for i in range(np.shape(x)[0])])
+
+
+    def P_x_id(self, x, z, Theta):
+
+        if self.Type == 'Binaries':
+            p_1 = np.power(Theta, z).prod()
+            p_0 = np.power((1 - Theta), z).prod()
+
+            return (p_1/(p_0 + p_1))**x*(p_0/(p_0 + p_1))**(1-x)
+
+
+    def rate(self, x, i, k, z_0, z_1, Theta):
+
+        if self.Type == 'Binaries':
             m = sum(z_1[:, k])-1
-            rate_m = (np.shape(x)[0]-m)/m
-            for k in range(np.shape(Theta)[0]):
-                for d in range(np.shape(Theta)[1]):
-                    rate = rate*np.exp(z_2[i, k]*x[i, d]*np.log(Theta[k, d]/(1+Theta[k, d])))/np.exp(z_1[i, k]*x[i, d]*np.log(Theta[k, d]/(1+Theta[k, d])))
-            rate = rate*rate_m
-            # for i in range(np.shape(x)[1]):
-            #     for d in range(np.shape(Theta)[1]):
-            #         theta_temp_1 = np.prod(np.power(Theta[:,d], z_1[i,:]))/(np.prod(np.power(1-Theta[:,d], z_1[i,:]))+ np.prod(np.power(Theta[:,d], z_1[i,:])))
-            #         theta_temp_0 = np.prod(np.power(Theta[:,d], z_2[i,:]))/(np.prod(np.power(1-Theta[:,d], z_2[i,:]))+ np.prod(np.power(Theta[:,d], z_2[i,:])))
-            #         rate_1 = (theta_temp_1**x[i,d])*((1-theta_temp_1)**(1-x[i,d]))
-            #         rate_0 = (theta_temp_0 ** x[i,d]) * ((1 - theta_temp_0) ** (1 - x[i,d]))
-            #         rate = rate*rate_0/rate_1
+            p_0 = (np.shape(x)[0]-m)*self.P_x_i(x[i, :], z_0[i, :], Theta)
+            p_1 = m*self.P_x_i(x[i, :], z_1[i, :], Theta)
+            rate = p_1/(p_1 + p_0)
 
         return rate
 
@@ -50,21 +53,23 @@ class IOOM:
         Theta_temp = Theta.copy()
 
         if self.Type == 'Binaries':
+            for i, j in zip(range(K), range(d)):
+                Theta_temp[i, j] = np.random.uniform(high=max(Theta[i, j] - omega, 0), low=min(Theta[i, j] + omega, 1))
+
             for i,j in zip(range(K), range(d)):
-                Theta_temp[i, j] = np.random.uniform(high=max(Theta[i, j]-omega, 0), low=min(Theta[i, j]+omega, 1))
                 t_ratio = (max(Theta_temp[i, j]-omega, 0)-min(Theta_temp[i, j]+omega, 1))/(max(Theta[i, j]-omega, 0)-min(Theta[i, j]+omega, 1))
-                p_ratio = self.rate(np.reshape(x[i,j], (1,1)), z[i,:], np.reshape(Theta_temp[:,j], (K,1)))/self.rate(np.reshape(x[i,j], (1,1)), z[i,:], np.reshape(Theta[:,j], (K,1)))
-                a = t_ratio*p_ratio
+                p_ratio = self.P_x_d(x[:, j], z, Theta_temp[:, j]) / self.P_x_d(x[:, j], z, Theta_temp[:, j])
+                accept_ratio = t_ratio*p_ratio
                 u = np.random.uniform(low=0, high=1)
-                if (u < a):
+                if u < accept_ratio:
                    Theta_out[i, j] = Theta_temp[i, j]
 
-                Theta_temp = Theta
+                Theta_temp[i, j] = Theta[i, j]
 
         return Theta_out
 
 
-    def fit(self, x, K_init, Niter, alpha=1, omega=0.01, prop_new_clusts=True):
+    def fit(self, x, K_init, Niter, alpha=1, omega=0.01, prop_new_clusts=True, Z_true=None):
         '''
         Computes the estimated clusters and Theta
         :param x: (np array) The unlabeled data
@@ -76,35 +81,52 @@ class IOOM:
         :return: (np array) clusters (np array) theta
         '''
 
+        Z_out = []
+        U_out = []
+        Theta_out = []
+
         n, d = np.shape(x)
         Theta = self.init_Theta(K_init, d)
         K = K_init
 
+        Knew = 0
+
         z = np.random.binomial(n=1, p=0.5, size=(n, K_init))
 
         for j in range(Niter):
+
+            K_t = (z.sum(axis=0) > 0).sum()
             for i in range(n):
-                for k in range(K):
-                    z_temp = z.copy()
-                    z_temp[i, k] = 1
-                    z_temp_2 = z.copy()
-                    z_temp[i, k] = 0
-                    #p_1 = (sum(z_temp[:,k])-1)/n*self.rate(x[i,:], z_temp[i,:], Theta)
-                    #p_0 = (n-sum(z_temp_2[:,k]))/n*self.rate(x[i,:], z_temp_2[i,:], Theta)
-                    p = self.rate_ratio(x, i, k, z_temp, z_temp_2, Theta)
-                    print(1/(p+1))
-                    z[i, k] = np.random.binomial(n=1, p=1/(p+1))
+                for k in range(K_t):
+                    z_temp_1 = z[:, z.sum(axis=0) > 0].copy()
+                    z_temp_1[i, k] = 1
+                    z_temp_0 = z[:, z.sum(axis=0) > 0].copy()
+                    z_temp_0[i, k] = 0
+                    p = self.rate(x, i, k, z_temp_0, z_temp_1, Theta[z.sum(axis=0) > 0, :])
+                    z[:, z.sum(axis=0) > 0][i, k] = np.random.binomial(n=1, p=p)
 
                 if prop_new_clusts:
                     k_new = np.random.poisson(alpha/n)
-                    Theta = np.concatenate([Theta, self.init_Theta(k_new, d)], axis=0)
-                    z = np.concatenate([z, np.zeros((n,k_new))], axis=1)
-                    z[i, K:(K+k_new)]=1
-                    K += k_new
+                    if k_new > 0:
+                        Theta_prop = np.concatenate([Theta, self.init_Theta(k_new, d)], axis=0)
+                        z_prop = np.concatenate([z, np.zeros((n, k_new))], axis=1)
+                        z_prop[i, K:(K + k_new)] = 1
+                        accept_ratio = np.prod([self.P_x_i(x[i, :], z_prop[i,:], Theta_prop)/self.P_x_i(x[i, :], z[i,:], Theta) for i in range(n)])
+                        u = np.random.uniform(low=0, high=1)
+                        if u < accept_ratio:
+                            Knew += 1
+                            Theta = Theta_prop
+                            z = z_prop
+                            K += k_new
 
             Theta = self.sample_Theta(x, z, Theta, K, d, omega)
+            Z_out.append(z)
+            U_out.append(np.dot(z[:, z.sum(axis=0) > 0],np.transpose(z[:, z.sum(axis=0) > 0])))
+            Theta_out.append(Theta)
+
+            if j%10 == 0:
+                print('Iteration {} done'.format(j))
 
 
-
-        return z, Theta
+        return Z_out, U_out, Theta_out
 
