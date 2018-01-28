@@ -23,19 +23,19 @@ U_true = np.dot(Z_true,np.transpose(Z_true))
 
 ioom_classifier = IOOM(Type='Binaries')
 
-list_Z, list_U, list_Theta = ioom_classifier.fit(X, K_init=2, Niter=2000, alpha=1, omega=0.1, prop_new_clusts=True, Z_true=Z_true)
+list_Z, list_U, list_Theta = ioom_classifier.fit(X, K_init=2, Niter=2000, alpha=0.1, omega=0.1, prop_new_clusts=True)
 
 utils.Compute_accuracy(list_U, U_true, thresh=0, burn_in=1000)
 
 burn_in=1000
 U = sum(list_U[burn_in:len(list_U)])/(len(list_U)-burn_in)
 U = np.vectorize(round)(U)
-utils.plot_similarity(U, title='', save_path='/media/sf_Debian-shared-folder/', name='fig1')
-utils.plot_similarity(U_true, title='', save_path='/media/sf_Debian-shared-folder/', name='fig2')
+utils.plot_similarity(U, title='', save_path='/media/sf_Debian-shared-folder/', name='fig_test_1_simulated_U')
+utils.plot_similarity(U_true, title='', save_path='/media/sf_Debian-shared-folder/', name='fig_test_1_true_U')
 
-utils.plot_n_clusters(list_Z, True_n_clusters = 2, burn_in=1000, title='', save_path='/media/sf_Debian-shared-folder/', name='fig')
+utils.plot_n_clusters(list_Z, True_n_clusters = 2, burn_in=1000, title='', save_path='/media/sf_Debian-shared-folder/', name='fig_test_1_n_clusters')
 
-#Testing IOOM on a toy data set with more clusters and dimension
+#Testing IOMM on a toy data set with more clusters and dimension
 d = 15 #Dimension of the data (number of features)
 K = 5 #Number of clusters
 n = 100 #Number of individuals
@@ -46,19 +46,63 @@ params = np.random.binomial(n=1, p=0.15, size=(K, d))
 X = np.zeros((n, d))
 Z_true = np.zeros((n, K))
 for k in range(K):
-    Z_true[10*k:10*(k+1), k] = 1
+    Z_true[20*k:20*(k+1), k] = 1
     for i in range(d):
-        X[k*10:(k+1)*10, i] = np.random.binomial(n=1, p=params[k, i], size=(10,))
+        X[k*20:(k+1)*20, i] = np.random.binomial(n=1, p=params[k, i], size=(20,))
+
+U_true = np.dot(Z_true,np.transpose(Z_true))
+utils.plot_similarity(U_true, title='', save_path='/media/sf_Debian-shared-folder/', name='fig_test_2_true_U')
 
 ioom_classifier = IOOM(Type='Binaries')
 
-Z, Theta = ioom_classifier.fit(X, K_init=2, Niter=5000, alpha=1, omega=0.1, prop_new_clusts=True, Z_true=Z_true)
+list_Z, list_U, list_Theta = ioom_classifier.fit(X, K_init=2, Niter=3000, alpha=0.1, omega=0.1, prop_new_clusts=True)
 
-print((np.abs(np.dot(Z,np.transpose(Z))-np.dot(Z_true,np.transpose(Z_true))) <= 0).sum()/(100**2))
-print((np.abs(np.dot(Z,np.transpose(Z))-np.dot(Z_true,np.transpose(Z_true))) <= 1).sum()/(100**2))
-print((np.abs(np.dot(Z,np.transpose(Z))-np.dot(Z_true,np.transpose(Z_true))) <= 2).sum()/(100**2))
+utils.Compute_accuracy(list_U, U_true, thresh=0, burn_in=2000)
 
-print((np.dot(Z_true,np.transpose(Z_true)) <= 0).sum()/(100**2))
+burn_in=2000
+U = sum(list_U[burn_in:len(list_U)])/(len(list_U)-burn_in)
+U = np.vectorize(round)(U)
+utils.plot_similarity(U, title='', save_path='/media/sf_Debian-shared-folder/', name='fig_test_2_simulated_U')
+
+utils.plot_n_clusters(list_Z, True_n_clusters = 5, burn_in=2000, title='', save_path='/media/sf_Debian-shared-folder/', name='fig_test_2_n_clusters')
+
+
+
+#Testing IOMM on a toy data set with gaussian clusters
+d = 15 #Dimension of the data (number of features)
+K = 5 #Number of clusters
+n = 100 #Number of individuals
+
+params = np.random.uniform(size=(K, 2*d))
+
+X = np.zeros((n, d))
+Z_true = np.zeros((n, K))
+for k in range(K):
+    Z_true[20*k:20*(k+1), k] = 1
+    Z_true[20*k+10:20*(k + 1), min(k+1, K-1)] = 1
+
+for i in range(n):
+    for j in range(d):
+        X[i, j] = np.random.normal(loc=(params[:, j]* 1/params[:, d+j]* Z_true[i, :]).sum(),
+                                               scale=1/(1/params[:, d+j]*Z_true[i, :]).sum())
+
+U_true = np.dot(Z_true,np.transpose(Z_true))
+utils.plot_similarity(U_true, title='', save_path='/media/sf_Debian-shared-folder/', name='fig_test_3_true_U')
+
+ioom_classifier = IOOM(Type='Gaussian')
+
+list_Z, list_U, list_Theta = ioom_classifier.fit(X, K_init=1, Niter=3000, alpha=1, omega=0.1, prop_new_clusts=True, stochastic=True)
+
+utils.Compute_accuracy(list_U, U_true, thresh=0, burn_in=2000)
+
+burn_in=2000
+U = sum(list_U[burn_in:len(list_U)])/(len(list_U)-burn_in)
+U = np.vectorize(round)(U)
+utils.plot_similarity(U, title='', save_path='/media/sf_Debian-shared-folder/', name='fig_test_3_simulated_U')
+
+utils.plot_n_clusters(list_Z, True_n_clusters = 5, burn_in=2000, title='', save_path='/media/sf_Debian-shared-folder/', name='fig_test_3_n_clusters')
+
+
 
 
 
