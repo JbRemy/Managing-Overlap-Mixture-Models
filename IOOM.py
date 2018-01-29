@@ -1,6 +1,11 @@
 import numpy as np
-from scipy.stats import norm
-import time as time
+from scipy.stats import invwishart
+
+def normpdf(x, mu=0, sigma=1):
+
+    u = float((x-mu) / abs(sigma))
+    y = np.exp(-u*u/2) / (np.sqrt(2*np.pi) * abs(sigma))
+    return y
 
 class IOOM:
     def __init__(self, Type = 'Binaries'):
@@ -37,8 +42,15 @@ class IOOM:
             return (p_1/(p_0 + p_1))**x*(p_0/(p_0 + p_1))**(1-x)
 
         if self.Type == 'Gaussian':
+            sigma = 1/(np.multiply(1 / Theta[:, 1], z)).sum()
+            mu = np.multiply(Theta[:, 0], np.multiply(1/Theta[:, 1], z)).sum()
+            prob = normpdf(x, mu=sigma*mu, sigma=np.sqrt(sigma))
+            if np.isnan(prob):
+                return 0
 
-            return norm.pdf(x, loc=(Theta[:, 0]*1/Theta[:, 1]*z).sum(), scale=1/(1/Theta[:, 1]*z).sum())
+            else:
+                return prob
+
 
     def rate(self, x, i, k, z_0, z_1, Theta):
 
@@ -56,41 +68,52 @@ class IOOM:
             Theta = np.random.uniform(low=1e-10, high=1-(1e-10), size=(K, d))
 
         if self.Type == 'Gaussian':
-            Theta =  np.random.uniform(low=1e-10, high=1-(1e-10), size=(K, 2*d))
+            Theta =  np.concatenate([np.random.uniform(low=-1, high=1, size=(K, d)),
+                                    np.random.uniform(low=1e-10, high=1-(1e-10), size=(K, d))], axis=1)
 
         return Theta
+
 
     def sample_Theta(self, x, z, Theta, K, d, omega):
 
         Theta_out = Theta.copy()
         Theta_temp = Theta.copy()
 
-        for i, j in zip(range(K), range(d)):
-            Theta_temp[i, j] = np.random.uniform(high=max(Theta[i, j] - omega, 1e-10), low=min(Theta[i, j] + omega, 1))
+        for i in range(K):
+            for j in range(d):
+                if self.Type == 'Binaries':
+                    Theta_temp[i, j] = np.random.uniform(high=max(Theta[i, j] - omega, 1e-10),
+                                                         low=min(Theta[i, j] + omega, 1))
 
-        for i,j in zip(range(K), range(d)):
-            t_ratio = (max(Theta_temp[i, j]-omega, 0)-min(Theta_temp[i, j]+omega, 1))/(max(Theta[i, j]-omega, 0)-min(Theta[i, j]+omega, 1))
-            if self.Type == 'Binaries':
-                p_ratio = self.P_x_d(x[:, j], z, Theta_temp[:, j]) / self.P_x_d(x[:, j], z, Theta_temp[:, j])
+                elif self.Type == 'Gaussian':
+                    Theta_temp[i, j] = np.random.uniform(high=Theta[i, j] - omega,
+                                                         low=Theta[i, j] + omega)
+                    Theta_temp[i, j+d] = np.random.uniform(high=max(Theta[i, j + d] - omega, 1e-10),
+                                                         low=min(Theta[i, j + d] + omega, 1))
 
-            elif self.Type == 'Gaussian':
-                p_ratio = self.P_x_d(x[:, j], z, Theta_temp[:, [j, d+j]]) / self.P_x_d(x[:, j], z, Theta_temp[:, [j, d+j]])
+        for i in range(K):
+            for j in range(d):
+                if self.Type == 'Binaries':
+                    t_ratio = (max(Theta_temp[i, j+d] - omega, 0) - min(Theta_temp[i, j+d] + omega, 1)) / (
+                            max(Theta[i, j+d] - omega, 0) - min(Theta[i, j+d] + omega, 1))
+                    p_ratio = self.P_x_d(x[:, j], z, Theta_temp[:, j]) / self.P_x_d(x[:, j], z, Theta[:, j])
 
-            accept_ratio = t_ratio*p_ratio
-            u = np.random.uniform(low=0, high=1)
-            if u < accept_ratio:
-               Theta_out[i, j] = Theta_temp[i, j]
+                elif self.Type == 'Gaussian':
+                    t_ratio = (max(Theta_temp[i, d+j] - omega, 0) - min(Theta_temp[i, d+j] + omega, 1)) / \
+                              (max(Theta[i, d+j] - omega, 0) - min(Theta[i, d+j] + omega, 1))
+                    p_ratio = self.P_x_d(x[:, j], z, Theta_temp[:, [j, d+j]]) / self.P_x_d(x[:, j], z, Theta[:, [j, d+j]])
 
-            Theta_temp[i, j] = Theta[i, j]
+                accept_ratio = t_ratio*p_ratio
+                u = np.random.uniform(low=0, high=1)
+                if u < accept_ratio:
+                   Theta_out[i, j] = Theta_temp[i, j]
+
+                Theta_temp[i, j] = Theta[i, j]
 
         return Theta_out
 
 
-    def discard_clusters(self, z, dict_z, Theta):
-
-        for i in range
-
-    def fit(self, x, K_init, Niter, alpha=1, omega=0.01, prop_new_clusts=True, stochastic = False):
+    def fit(self, x, K_init, Niter, alpha=1, omega=0.01, prop_new_clusts=True, stochastic = False, burn_in=0):
         '''
         Computes the estimated clusters and Theta
         :param x: (np array) The unlabeled data
@@ -102,9 +125,7 @@ class IOOM:
         :return: (np array) clusters (np array) theta
         '''
 
-        Z_out = []
-        U_out = []
-        Theta_out = []
+        n_clusters = []
 
         n, d = np.shape(x)
         Theta = self.init_Theta(K_init, d)
@@ -113,9 +134,10 @@ class IOOM:
 
         for j in range(Niter):
 
-            K = (z.sum(axis=0) > 0).sum()
-            z_t = z[:, z.sum(axis=0) > 0].copy()
-            Theta_t = Theta[z.sum(axis=0) > 0, :].copy()
+            ind = z.sum(axis=0) > 0
+            K = ind.sum()
+            z_t = z[:, ind].copy()
+            Theta_t = Theta[ind, :].copy()
             for i in range(n):
                 if stochastic:
                     i_ind = np.random.choice(n)
@@ -146,35 +168,53 @@ class IOOM:
                         Theta_prop = self.init_Theta(k_new, d)
                         Theta_prop_t = np.concatenate([Theta_t, Theta_prop], axis=0)
                         z_prop = np.zeros((n, k_new))
-                        z_prop_t = np.concatenate([z_t, z_prop], axis=1)
                         z_prop[i_ind, :] = 1
-                        z_prop_t[i_ind, K:(K + k_new)] = 1
+                        z_prop_t = np.concatenate([z_t, z_prop], axis=1)
                         accept_ratio = np.prod([self.P_x_i(x[_, :], z_prop_t[_,:], Theta_prop_t)/self.P_x_i(
                                 x[_, :], z_t[_,:], Theta_t) for _ in range(n)])
                         u = np.random.uniform(low=0, high=1)
-                        if u < accept_ratio or np.isnan(accept_ratio):
+                        if (u < accept_ratio) or (np.isnan(accept_ratio) == True):
                             K += k_new
-                            Theta_t =  Theta_prop_t
-                            z_t =  z_prop_t
+                            Theta_t =  Theta_prop_t.copy()
+                            z_t =  z_prop_t.copy()
                             Theta = np.concatenate([Theta, Theta_prop], axis=0)
                             z = np.concatenate([z, z_prop], axis=1)
 
-            #Theta[z.sum(axis=0) > 0, :] = Theta_t
-            #z[:, z.sum(axis=0) > 0] = z_t
+            ind = z.sum(axis=0) > 0
+            Theta[ind, :] = Theta_t.copy()
+            z[:, ind] = z_t.copy()
 
-            Theta = Theta_t
-            z = z_t
+            ind = z.sum(axis=0) > 0
+            Theta[ind, :] = self.sample_Theta(x, z[:, ind], Theta[ind, :], ind.sum(), d, omega)
 
-            Theta = self.sample_Theta(x, z, Theta, K, d, omega)
-            #Z_out.append(z)
-            U_out.append(np.dot(z[:, z.sum(axis=0) > 0],np.transpose(z[:, z.sum(axis=0) > 0])))
-            Theta_out.append(Theta)
+            if j == burn_in:
+                U_out = np.dot(z[:, ind], np.transpose(z[:, ind]))
+                Theta_out = Theta
+                Z_out = z
+
+            if j > burn_in:
+                U_out = np.add(U_out, np.dot(z_t, np.transpose(z_t)))
+                if self.Type == 'Binaries':
+                    Theta_out = np.concatenate([Theta_out, np.zeros((np.shape(Theta)[0]-np.shape(Theta_out)[0], d))],
+                                               axis=0)
+
+                elif self.Type=='Gaussian':
+                    Theta_out = np.concatenate([Theta_out, np.zeros((np.shape(Theta)[0] - np.shape(Theta_out)[0], 2*d))],
+                                               axis=0)
+
+                Theta_out = np.add(Theta_out, Theta)
+                Z_out = np.concatenate([Z_out, np.zeros((n, np.shape(z)[1]-np.shape(Z_out)[1]))], axis=1)
+                Z_out = np.add(Z_out, z)
+                n_clusters.append(K)
 
             if j%10 == 0:
                 print('Iteration {} done'.format(j))
 
+        U_out = U_out / (Niter-burn_in)
+        Theta_out = Theta_out / (Niter-burn_in)
+        Z_out = Z_out / (Niter-burn_in)
 
-        return Z_out, U_out, Theta_out
+        return Z_out, U_out, Theta_out, n_clusters
 
 
 
