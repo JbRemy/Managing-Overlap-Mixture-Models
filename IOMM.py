@@ -2,17 +2,31 @@ import numpy as np
 from scipy.stats import invwishart
 
 def normpdf(x, mu=0, sigma=1):
+    '''
+    computes the pdf of a normal distribution
+    :param x: (float)
+    :param mu: (float) mean
+    :param sigma: (float) std
+    :return: (float)
+    '''
 
     u = float((x-mu) / abs(sigma))
     y = np.exp(-u*u/2) / (np.sqrt(2*np.pi) * abs(sigma))
     return y
 
-class IOOM:
+class IOMM:
     def __init__(self, Type = 'Binaries'):
 
         self.Type = Type
 
     def P_x_i(self, x, z, Theta):
+        '''
+        computes the probability of the vector x conditionally to its clusters assignations z and the parameters Theta
+        :param x: (np array)
+        :param z: (np array)
+        :param Theta: (np array)
+        :return: (float)
+        '''
 
         if self.Type == 'Binaries':
 
@@ -24,7 +38,13 @@ class IOOM:
 
 
     def P_x_d(self, x, z, Theta):
-
+        '''
+        compute the probability of an entire column given the clusters attributions z and the parameters Theta
+        :param x: (np array)
+        :param z: (np array)
+        :param Theta: (np array)
+        :return: (float)
+        '''
         if self.Type == 'Binaries':
 
             return np.prod([self.P_x_id(x[i], z[i, :], Theta) for i in range(np.shape(x)[0])])
@@ -35,6 +55,13 @@ class IOOM:
 
 
     def P_x_id(self, x, z, Theta):
+        '''
+        computes the probability of obtaining x on the d th variable given the clusters and parameters
+        :param x: (float)
+        :param z: (np array)
+        :param Theta: (np array)
+        :return: (float)
+        '''
 
         if self.Type == 'Binaries':
             p_1 = np.power(Theta, z).prod()
@@ -53,6 +80,16 @@ class IOOM:
 
 
     def rate(self, x, i, k, z_0, z_1, Theta):
+        '''
+        Probability of z[i, k] = 1 knowing Theta
+        :param x: (np array)
+        :param i: (int)
+        :param k: (int)
+        :param z_0: (np array) with z[i, k] = 0
+        :param z_1: (np array) with z[i, k] = 1
+        :param Theta: (np array)
+        :return: (float)
+        '''
 
         m = sum(z_1[:, k])-1
         p_0 = (np.shape(x)[0]-m)*self.P_x_i(x[i, :], z_0[i, :], Theta)
@@ -63,18 +100,42 @@ class IOOM:
 
 
     def init_Theta(self, K, d):
+        '''
+        initializes Theta
+        :param K: (int) number of cluusters
+        :param d: (int) number of variables
+        :return: (np array)
+        '''
 
         if self.Type == 'Binaries' :
             Theta = np.random.uniform(low=1e-10, high=1-(1e-10), size=(K, d))
 
         if self.Type == 'Gaussian':
+            #Theta = np.zeros((K, 2*d))
+            # for i in range(K):
+            #     for j in range(d):
+            #         sigma = invwishart.rvs(df=1, scale=0.5, size=1, random_state=None)
+            #         mu = np.random.normal(loc=0, scale=3*sigma)
+            #         Theta[i, j] = mu
+            #         Theta[i, j+d] = sigma
+
             Theta =  np.concatenate([np.random.uniform(low=-1, high=1, size=(K, d)),
-                                    np.random.uniform(low=1e-10, high=1-(1e-10), size=(K, d))], axis=1)
+                                   np.random.uniform(low=1e-10, high=1-(1e-10), size=(K, d))], axis=1)
 
         return Theta
 
 
     def sample_Theta(self, x, z, Theta, K, d, omega):
+        '''
+        Proposition of a new Theta with respect to the current Theta, the clusters assignations z, and the data x
+        :param x: (np array)
+        :param z: (np array)
+        :param Theta: (np array)
+        :param K: (int)
+        :param d: (int)
+        :param omega: (float) width of the proposition window
+        :return: (np array)
+        '''
 
         Theta_out = Theta.copy()
         Theta_temp = Theta.copy()
@@ -94,8 +155,8 @@ class IOOM:
         for i in range(K):
             for j in range(d):
                 if self.Type == 'Binaries':
-                    t_ratio = (max(Theta_temp[i, j+d] - omega, 0) - min(Theta_temp[i, j+d] + omega, 1)) / (
-                            max(Theta[i, j+d] - omega, 0) - min(Theta[i, j+d] + omega, 1))
+                    t_ratio = (max(Theta_temp[i, j] - omega, 0) - min(Theta_temp[i, j] + omega, 1)) / (
+                            max(Theta[i, j] - omega, 0) - min(Theta[i, j] + omega, 1))
                     p_ratio = self.P_x_d(x[:, j], z, Theta_temp[:, j]) / self.P_x_d(x[:, j], z, Theta[:, j])
 
                 elif self.Type == 'Gaussian':
